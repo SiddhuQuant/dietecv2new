@@ -6,6 +6,8 @@ import { motion } from "motion/react";
 import { useState, useEffect } from "react";
 import { apiClient } from "../services/api";
 import { appointmentService, Appointment } from "../services/appointmentService";
+import { doctorService, DoctorStats, PatientRecord } from "../services/doctorService";
+import { authService } from "../services/authService";
 
 interface DoctorDashboardProps {
   onNavigate: (section: string) => void;
@@ -17,10 +19,40 @@ interface DoctorDashboardProps {
 
 export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleTheme }: DoctorDashboardProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [stats, setStats] = useState<DoctorStats>({ todayAppointments: 0, totalPatients: 0, monthAppointments: 0 });
+  const [patients, setPatients] = useState<PatientRecord[]>([]);
+  const [pendingActions, setPendingActions] = useState({ pendingAppointments: 0, newReports: 0, prescriptionUpdates: 0 });
 
   useEffect(() => {
-    loadAppointments();
+    loadAllData();
   }, []);
+
+  const loadAllData = async () => {
+    const currentUser = await authService.getCurrentUser();
+    if (currentUser?.email) {
+      await Promise.all([
+        loadAppointments(),
+        loadStats(currentUser.email),
+        loadPatients(currentUser.email),
+        loadPendingActions(currentUser.email)
+      ]);
+    }
+  };
+
+  const loadStats = async (email: string) => {
+    const doctorStats = await doctorService.getStats(email);
+    setStats(doctorStats);
+  };
+
+  const loadPatients = async (email: string) => {
+    const patientRecords = await doctorService.getMyPatients(email);
+    setPatients(patientRecords);
+  };
+
+  const loadPendingActions = async (email: string) => {
+    const actions = await doctorService.getPendingActions(email);
+    setPendingActions(actions);
+  };
 
   const loadAppointments = async () => {
     try {
@@ -147,7 +179,7 @@ export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleThem
                   <p className={`text-sm font-medium ${isDarkMode ? "text-blue-300" : "text-blue-600"}`}>
                     Today's Appointments
                   </p>
-                  <p className="text-3xl font-bold mt-2">2</p>
+                  <p className="text-3xl font-bold mt-2">{stats.todayAppointments}</p>
                 </div>
                 <Calendar className={`w-8 h-8 ${isDarkMode ? "text-blue-400" : "text-blue-500"}`} />
               </div>
@@ -161,7 +193,7 @@ export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleThem
                   <p className={`text-sm font-medium ${isDarkMode ? "text-green-300" : "text-green-600"}`}>
                     Total Patients
                   </p>
-                  <p className="text-3xl font-bold mt-2">24</p>
+                  <p className="text-3xl font-bold mt-2">{stats.totalPatients}</p>
                 </div>
                 <Users className={`w-8 h-8 ${isDarkMode ? "text-green-400" : "text-green-500"}`} />
               </div>
@@ -175,7 +207,7 @@ export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleThem
                   <p className={`text-sm font-medium ${isDarkMode ? "text-purple-300" : "text-purple-600"}`}>
                     Appointments This Month
                   </p>
-                  <p className="text-3xl font-bold mt-2">18</p>
+                  <p className="text-3xl font-bold mt-2">{stats.monthAppointments}</p>
                 </div>
                 <TrendingUp className={`w-8 h-8 ${isDarkMode ? "text-purple-400" : "text-purple-500"}`} />
               </div>
@@ -268,9 +300,18 @@ export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleThem
                 Pending Actions
               </h3>
               <div className={`space-y-3 text-sm ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
-                <p>• Confirm 3 pending appointments</p>
-                <p>• Review 2 new patient reports</p>
-                <p>• Update prescription for 1 patient</p>
+                {pendingActions.pendingAppointments > 0 && (
+                  <p>• Confirm {pendingActions.pendingAppointments} pending appointment{pendingActions.pendingAppointments > 1 ? 's' : ''}</p>
+                )}
+                {pendingActions.newReports > 0 && (
+                  <p>• Review {pendingActions.newReports} new patient report{pendingActions.newReports > 1 ? 's' : ''}</p>
+                )}
+                {pendingActions.prescriptionUpdates > 0 && (
+                  <p>• Update prescription for {pendingActions.prescriptionUpdates} patient{pendingActions.prescriptionUpdates > 1 ? 's' : ''}</p>
+                )}
+                {pendingActions.pendingAppointments === 0 && pendingActions.newReports === 0 && pendingActions.prescriptionUpdates === 0 && (
+                  <p className={isDarkMode ? "text-slate-500" : "text-gray-500"}>No pending actions at this time</p>
+                )}
               </div>
             </Card>
           </motion.div>
@@ -283,14 +324,7 @@ export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleThem
             My Patients
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { name: "John Doe", age: 45, condition: "Hypertension", lastVisit: "2026-01-03" },
-              { name: "Jane Smith", age: 32, condition: "Diabetes", lastVisit: "2026-01-04" },
-              { name: "Mike Johnson", age: 58, condition: "Arthritis", lastVisit: "2025-12-28" },
-              { name: "Sarah Williams", age: 28, condition: "Allergy", lastVisit: "2025-12-20" },
-              { name: "David Brown", age: 51, condition: "Asthma", lastVisit: "2026-01-02" },
-              { name: "Lisa Anderson", age: 39, condition: "Migraine", lastVisit: "2025-12-15" }
-            ].map((patient, index) => (
+            {patients.length > 0 ? patients.map((patient, index) => (
               <Card key={index} className={`p-4 border-0 hover:shadow-lg transition-shadow cursor-pointer ${
                 isDarkMode ? "bg-slate-800/50" : "bg-white/50"
               }`}>
@@ -311,7 +345,12 @@ export function DoctorDashboard({ doctorName, onLogout, isDarkMode, onToggleThem
                   View Records
                 </Button>
               </Card>
-            ))}
+            )) : (
+              <div className={`col-span-3 text-center py-8 ${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>
+                <Users className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p>No patient records found</p>
+              </div>
+            )}
           </div>
         </motion.div>
       </main>

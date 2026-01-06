@@ -68,11 +68,41 @@ export default function App() {
   const [showProfileSetup, setShowProfileSetup] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Initialize Supabase Auth listener
+  // Check for existing session on mount
   useEffect(() => {
-    let hasCheckedProfile = false; // Prevent repeated profile checks
-    
-    // Handle browser back/forward navigation
+    const checkSession = async () => {
+      // 1. Check localStorage for doctor/admin (they don't use Supabase Auth)
+      const storedUser = localStorage.getItem('dietec-current-user');
+      if (storedUser) {
+        try {
+          const userData = JSON.parse(storedUser);
+          setUser({
+            name: userData.name,
+            email: userData.email,
+            role: userData.role
+          });
+          setIsLoading(false);
+          return;
+        } catch (e) {
+          localStorage.removeItem('dietec-current-user');
+        }
+      }
+
+      // 2. Check Supabase session for patients
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser({
+          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+          email: session.user.email || '',
+          role: 'patient'
+        });
+      }
+      setIsLoading(false);
+    };
+
+    checkSession();
+
+    // Handle browser navigation
     const handlePopState = () => {
       const hash = window.location.hash.replace('#', '');
       const validSections: Section[] = [
@@ -80,7 +110,6 @@ export default function App() {
         "firstaid", "doctor", "exercises", "medicaladvisor",
         "billing", "medicines"
       ];
-      
       if (validSections.includes(hash as Section)) {
         setCurrentSection(hash as Section);
       } else {
@@ -89,79 +118,7 @@ export default function App() {
     };
 
     window.addEventListener('popstate', handlePopState);
-    
-    // Check active session - Use improved auth service
-    authService.getCurrentUser().then((currentUser) => {
-      if (currentUser) {
-        setUser({
-          name: currentUser.name,
-          email: currentUser.email,
-          role: currentUser.role
-        });
-      }
-      setIsLoading(false);
-    }).catch((error) => {
-      console.error('❌ Error getting session:', error);
-      setIsLoading(false);
-    });
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔐 Auth state changed:', event);
-      
-      // Only process SIGNED_IN and SIGNED_OUT events
-      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-        return;
-      }
-      
-      if (session?.user && event === 'SIGNED_IN') {
-        // Fetch complete user profile with role
-        const currentUser = await authService.getCurrentUser();
-        if (currentUser) {
-          setUser({
-            name: currentUser.name,
-            email: currentUser.email,
-            role: currentUser.role
-          });
-          
-          // Check profile completion
-          if (!hasCheckedProfile) {
-            hasCheckedProfile = true;
-            
-            setTimeout(async () => {
-              try {
-                const hasCompletedProfile = await userProfileService.hasCompletedProfile();
-                
-                if (!hasCompletedProfile) {
-                  console.log('🚨 Profile not completed');
-                  setShowProfileSetup(true);
-                  setShowOnboarding(false);
-                } else {
-                  console.log('✅ Profile completed');
-                  setShowProfileSetup(false);
-                  
-                  const hasSeenOnboarding = localStorage.getItem("dietec-onboarding-completed");
-                  if (!hasSeenOnboarding) {
-                    setTimeout(() => setShowOnboarding(true), 1000);
-                  }
-                }
-              } catch (error) {
-                console.error('❌ Error checking profile:', error);
-              }
-            }, 100);
-        }
-      } else {
-        setUser(null);
-        hasCheckedProfile = false;
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-      window.removeEventListener('popstate', handlePopState);
-    };
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   // Load theme preference from localStorage on component mount
@@ -190,16 +147,12 @@ export default function App() {
   };
 
   const handleLogin = (userData: User) => {
-    setUser(userData);
+    setUser({
+      name: userData.name,
+      email: userData.email,
+      role: userData.role || 'patient'
+    });
     setCurrentSection("home");
-
-    // Check if this is first time user
-    const hasSeenOnboarding = localStorage.getItem(
-      "dietec-onboarding-completed",
-    );
-    if (!hasSeenOnboarding) {
-      setTimeout(() => setShowOnboarding(true), 1000);
-    }
   };
 
   const handleOnboardingComplete = () => {
@@ -208,8 +161,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    localStorage.removeItem('dietec-current-user');
     await supabase.auth.signOut();
-    // State update handled by onAuthStateChange
+    setUser(null);
     setCurrentSection("home");
   };
 

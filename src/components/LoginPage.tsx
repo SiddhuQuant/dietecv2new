@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { authService } from "../services/authService";
 
 interface LoginPageProps {
-  onLogin: (userData: { name: string; email: string }) => void;
+  onLogin: (userData: { name: string; email: string; role?: string }) => void;
   isDarkMode: boolean;
   onToggleTheme: () => void;
 }
@@ -45,7 +45,15 @@ export function LoginPage({ onLogin, isDarkMode, onToggleTheme }: LoginPageProps
       }
 
       setSuccess(`Welcome back, ${user.name}!`);
-      // The auth state listener in App.tsx will handle the rest
+      
+      // Call onLogin to trigger navigation
+      setTimeout(() => {
+        onLogin({ 
+          name: user.name, 
+          email: user.email,
+          role: user.role 
+        });
+      }, 500);
     } catch (err: any) {
       setError(err.message || "Failed to sign in");
     } finally {

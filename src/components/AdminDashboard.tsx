@@ -24,36 +24,44 @@ interface SystemMetric {
 export function AdminDashboard({ adminName, onLogout, isDarkMode, onToggleTheme }: AdminDashboardProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [metrics, setMetrics] = useState<SystemMetric[]>([]);
+  const [revenue, setRevenue] = useState({ today: 0, week: 0, month: 0, total: 0 });
 
   useEffect(() => {
     loadUsers();
     loadMetrics();
+    loadRevenue();
   }, []);
 
   const loadUsers = async () => {
     try {
-      const response = await apiClient.get<User[]>('/admin/users');
-      if (response && Array.isArray(response)) {
-        setUsers(response);
-      } else {
-        const serviceUsers = adminService.getUsers();
-        setUsers(serviceUsers);
-      }
+      const usersData = await adminService.getUsers();
+      setUsers(usersData);
     } catch (err) {
-      console.log('Using service data for users');
-      const serviceUsers = adminService.getUsers();
-      setUsers(serviceUsers);
+      console.error('Error loading users:', err);
     }
   };
 
-  const loadMetrics = () => {
-    const metricsData = adminService.getMetrics();
-    setMetrics([
-      { label: "Total Users", value: metricsData.totalUsers, change: 12 },
-      { label: "Active Doctors", value: metricsData.activeDoctors, change: 3 },
-      { label: "Active Patients", value: metricsData.activePatients, change: 9 },
-      { label: "Total Bookings", value: metricsData.totalBookings, change: 28 }
-    ]);
+  const loadMetrics = async () => {
+    try {
+      const metricsData = await adminService.getMetrics();
+      setMetrics([
+        { label: "Total Users", value: metricsData.totalUsers, change: 12 },
+        { label: "Active Doctors", value: metricsData.activeDoctors, change: 3 },
+        { label: "Active Patients", value: metricsData.activePatients, change: 9 },
+        { label: "Total Bookings", value: metricsData.totalBookings, change: 28 }
+      ]);
+    } catch (err) {
+      console.error('Error loading metrics:', err);
+    }
+  };
+
+  const loadRevenue = async () => {
+    try {
+      const revenueData = await adminService.getRevenue();
+      setRevenue(revenueData);
+    } catch (err) {
+      console.error('Error loading revenue:', err);
+    }
   };
 
   const containerVariants = {
@@ -105,8 +113,8 @@ export function AdminDashboard({ adminName, onLogout, isDarkMode, onToggleTheme 
     }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    adminService.deleteUser(userId);
+  const handleDeleteUser = async (userId: string) => {
+    await adminService.deleteUser(userId);
     loadUsers();
     loadMetrics();
   };
@@ -322,10 +330,10 @@ export function AdminDashboard({ adminName, onLogout, isDarkMode, onToggleTheme 
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              { label: "Today", value: "₹12,450", change: "+8%", color: "blue" },
-              { label: "This Week", value: "₹86,200", change: "+12%", color: "green" },
-              { label: "This Month", value: "₹3,42,800", change: "+15%", color: "purple" },
-              { label: "Total Revenue", value: "₹28,54,600", change: "+22%", color: "orange" }
+              { label: "Today", value: `₹${revenue.today.toLocaleString()}`, change: "+8%", color: "blue" },
+              { label: "This Week", value: `₹${revenue.week.toLocaleString()}`, change: "+12%", color: "green" },
+              { label: "This Month", value: `₹${revenue.month.toLocaleString()}`, change: "+15%", color: "purple" },
+              { label: "Total Revenue", value: `₹${revenue.total.toLocaleString()}`, change: "+22%", color: "orange" }
             ].map((stat, index) => (
               <Card key={index} className={`p-4 border-0 ${isDarkMode ? "bg-slate-800/50" : "bg-white/50"}`}>
                 <p className={`text-xs font-medium ${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>

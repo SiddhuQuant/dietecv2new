@@ -1,3 +1,5 @@
+import { supabase } from '../utils/supabase/client';
+
 export interface User {
   id: string;
   name: string;
@@ -7,107 +9,160 @@ export interface User {
   status: "active" | "inactive" | "suspended";
 }
 
-const USERS_STORAGE_KEY = 'dietec_admin_users';
-
-const DEFAULT_USERS: User[] = [
-  {
-    id: "1",
-    name: "John Doe",
-    email: "john@example.com",
-    role: "patient",
-    joinDate: "2025-12-01",
-    status: "active"
-  },
-  {
-    id: "2",
-    name: "Dr. Sarah Smith",
-    email: "sarah@example.com",
-    role: "doctor",
-    joinDate: "2025-11-15",
-    status: "active"
-  },
-  {
-    id: "3",
-    name: "Jane Doe",
-    email: "jane@example.com",
-    role: "patient",
-    joinDate: "2025-12-10",
-    status: "active"
-  },
-  {
-    id: "4",
-    name: "Dr. Mike Wilson",
-    email: "mike@example.com",
-    role: "doctor",
-    joinDate: "2025-11-01",
-    status: "inactive"
-  }
-];
-
 class AdminService {
-  getUsers(): User[] {
+  async getUsers(): Promise<User[]> {
     try {
-      const stored = localStorage.getItem(USERS_STORAGE_KEY);
-      if (stored) {
-        return JSON.parse(stored);
+      // Fetch from all three tables
+      const [
+        { data: patients },
+        { data: doctors },
+        { data: admins }
+      ] = await Promise.all([
+        supabase.from('patients').select('*'),
+        supabase.from('doctors').select('*'),
+        supabase.from('admins').select('*')
+      ]);
+
+      const allUsers: User[] = [];
+
+      // Map patients
+      if (patients) {
+        allUsers.push(...patients.map(p => ({
+          id: p.id,
+          name: p.name,
+          email: p.email,
+          role: 'patient' as const,
+          joinDate: new Date(p.created_at).toISOString().split('T')[0],
+          status: p.status || 'active'
+        })));
       }
+
+      // Map doctors
+      if (doctors) {
+        allUsers.push(...doctors.map(d => ({
+          id: d.id,
+          name: d.name,
+          email: d.email,
+          role: 'doctor' as const,
+          joinDate: new Date(d.created_at).toISOString().split('T')[0],
+          status: d.status || 'active'
+        })));
+      }
+
+      // Map admins
+      if (admins) {
+        allUsers.push(...admins.map(a => ({
+          id: a.id,
+          name: a.name,
+          email: a.email,
+          role: 'admin' as const,
+          joinDate: new Date(a.created_at).toISOString().split('T')[0],
+          status: a.status || 'active'
+        })));
+      }
+
+      return allUsers;
     } catch (error) {
       console.error('Error loading users:', error);
+      return [];
     }
-    
-    this.saveUsers(DEFAULT_USERS);
-    return DEFAULT_USERS;
   }
 
-  saveUsers(users: User[]): void {
+  async deleteUser(userId: string): Promise<boolean> {
     try {
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+      // Try deleting from all tables (will only succeed on the correct one)
+      await Promise.allSettled([
+        supabase.from('patients').delete().eq('id', userId),
+        supabase.from('doctors').delete().eq('id', userId),
+        supabase.from('admins').delete().eq('id', userId)
+      ]);
+      return true;
     } catch (error) {
-      console.error('Error saving users:', error);
+      console.error('Error deleting user:', error);
+      return false;
     }
   }
 
-  addUser(user: Omit<User, 'id'>): User {
-    const users = this.getUsers();
-    const maxId = users.reduce((max, u) => {
-      const num = parseInt(u.id);
-      return num > max ? num : max;
-    }, 0);
-    
-    const newUser: User = {
-      ...user,
-      id: String(maxId + 1)
-    };
-    
-    users.push(newUser);
-    this.saveUsers(users);
-    
-    return newUser;
+  async getMetrics(): Promise<{
+    totalUsers: number;
+    activeDoctors: number;
+    activePatients: number;
+    totalBookings: number;
+  }> {
+    try {
+      const [
+        { count: patientsCount },
+        { count: doctorsCount },
+        { count: bookingsCount }
+      ] = await Promise.all([
+        supabase.from('patients').select('*', { count: 'exact', head: true }),
+        supabase.from('doctors').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('appointments').select('*', { count: 'exact', head: true })
+      ]);
+
+      return {
+        totalUsers: (patientsCount || 0) + (doctorsCount || 0),
+        activeDoctors: doctorsCount || 0,
+        activePatients: patientsCount || 0,
+        totalBookings: bookingsCount || 0
+      };
+    } catch (error) {
+      console.error('Error loading metrics:', error);
+      return {
+        totalUsers: 0,
+        activeDoctors: 0,
+        activePatients: 0,
+        totalBookings: 0
+      };
+    }
   }
 
-  updateUserStatus(userId: string, status: "active" | "inactive" | "suspended"): void {
-    const users = this.getUsers();
-    const updated = users.map(u => 
-      u.id === userId ? { ...u, status } : u
-    );
-    this.saveUsers(updated);
-  }
+  async getRevenue(): Promise<{
+    today: number;
+    week: number;
+    month: number;
+    total: number;
+  }> {
+    try {
+      const { data: bills } = await supabase
+        .from('bills')
+        .select('amount, created_at, status')
+        .eq('status', 'paid');
 
-  deleteUser(userId: string): void {
-    const users = this.getUsers();
-    const filtered = users.filter(u => u.id !== userId);
-    this.saveUsers(filtered);
-  }
+      if (!bills) {
+        return { today: 0, week: 0, month: 0, total: 0 };
+      }
 
-  getMetrics() {
-    const users = this.getUsers();
-    return {
-      totalUsers: users.length,
-      activeDoctors: users.filter(u => u.role === "doctor" && u.status === "active").length,
-      activePatients: users.filter(u => u.role === "patient" && u.status === "active").length,
-      // Mock data for now, could be calculated from actual bookings later
-      totalBookings: 342
-    };
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      let todayTotal = 0;
+      let weekTotal = 0;
+      let monthTotal = 0;
+      let total = 0;
+
+      bills.forEach(bill => {
+        const amount = Number(bill.amount);
+        const date = new Date(bill.created_at);
+        
+        total += amount;
+        if (date >= today) todayTotal += amount;
+        if (date >= weekAgo) weekTotal += amount;
+        if (date >= monthAgo) monthTotal += amount;
+      });
+
+      return {
+        today: todayTotal,
+        week: weekTotal,
+        month: monthTotal,
+        total
+      };
+    } catch (error) {
+      console.error('Error loading revenue:', error);
+      return { today: 0, week: 0, month: 0, total: 0 };
+    }
   }
 }
 
