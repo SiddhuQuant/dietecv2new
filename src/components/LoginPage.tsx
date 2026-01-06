@@ -8,8 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { ThemeToggle } from "./ThemeToggle";
 import { motion } from "motion/react";
 import { Alert, AlertDescription } from "./ui/alert";
-import { supabase } from "../utils/supabase/client";
-import { projectId, publicAnonKey } from "../utils/supabase/info";
+import { authService } from "../services/authService";
 
 interface LoginPageProps {
   onLogin: (userData: { name: string; email: string }) => void;
@@ -23,25 +22,30 @@ export function LoginPage({ onLogin, isDarkMode, onToggleTheme }: LoginPageProps
     name: "", 
     email: "", 
     password: "", 
-    confirmPassword: "",
-    role: "patient" as const
+    confirmPassword: ""
   });
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: loginForm.email,
-        password: loginForm.password,
-      });
+      const { user, error: loginError } = await authService.login(
+        loginForm.email,
+        loginForm.password
+      );
 
-      if (error) throw error;
-      // Auth state listener in App.tsx will handle the rest
+      if (loginError || !user) {
+        throw new Error(loginError || "Login failed");
+      }
+
+      setSuccess(`Welcome back, ${user.name}!`);
+      // The auth state listener in App.tsx will handle the rest
     } catch (err: any) {
       setError(err.message || "Failed to sign in");
     } finally {
@@ -52,51 +56,35 @@ export function LoginPage({ onLogin, isDarkMode, onToggleTheme }: LoginPageProps
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (signupForm.password !== signupForm.confirmPassword) {
-        setError("Passwords do not match");
-        return;
+      setError("Passwords do not match");
+      return;
+    }
+
+    if (signupForm.password.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
     }
     
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
-        const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-e46e3ba6/signup`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
-            },
-            body: JSON.stringify({
-                email: signupForm.email,
-                password: signupForm.password,
-                name: signupForm.name,
-                role: signupForm.role
-            })
-        });
+      const { user, error: signupError } = await authService.signup(
+        signupForm.email,
+        signupForm.password,
+        signupForm.name
+      );
 
-        let data;
-        try {
-            data = await response.json();
-        } catch (e) {
-            console.error("Failed to parse signup response:", e);
-            throw new Error(`Server responded with status ${response.status}`);
-        }
-        
-        if (!response.ok) {
-            throw new Error(data.error || `Signup failed with status ${response.status}`);
-        }
+      if (signupError || !user) {
+        throw new Error(signupError || "Signup failed");
+      }
 
-        // Auto login after signup
-        const { error: loginError } = await supabase.auth.signInWithPassword({
-            email: signupForm.email,
-            password: signupForm.password,
-        });
-
-        if (loginError) throw loginError;
-
+      setSuccess("Account created successfully! Logging you in...");
+      // The auth state listener in App.tsx will handle the rest
     } catch (err: any) {
-        console.error("Signup error:", err);
-        setError(err.message || "Failed to sign up. Please try again.");
+      console.error("Signup error:", err);
+      setError(err.message || "Failed to sign up. Please try again.");
     } finally {
         setLoading(false);
     }
@@ -150,6 +138,13 @@ export function LoginPage({ onLogin, isDarkMode, onToggleTheme }: LoginPageProps
                   <Alert className="bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800">
                     <AlertCircle className="h-4 w-4 text-red-600" />
                     <AlertDescription className="text-sm text-red-600">{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {success && (
+                  <Alert className="bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800">
+                    <AlertCircle className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-sm text-green-600">{success}</AlertDescription>
                   </Alert>
                 )}
 

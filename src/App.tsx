@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./utils/supabase/client";
+import { authService } from "./services/authService";
 import { LoginPage } from "./components/LoginPage";
 import { HomePage } from "./components/HomePage";
 import { DoctorDashboard } from "./components/DoctorDashboard";
@@ -89,13 +90,13 @@ export default function App() {
 
     window.addEventListener('popstate', handlePopState);
     
-    // Check active session - SIMPLIFIED
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
+    // Check active session - Use improved auth service
+    authService.getCurrentUser().then((currentUser) => {
+      if (currentUser) {
         setUser({
-            name: session.user.user_metadata.name || session.user.email?.split('@')[0] || 'User',
-            email: session.user.email || '',
-            role: session.user.user_metadata.role || "patient"
+          name: currentUser.name,
+          email: currentUser.email,
+          role: currentUser.role
         });
       }
       setIsLoading(false);
@@ -104,50 +105,52 @@ export default function App() {
       setIsLoading(false);
     });
 
-    // Listen for changes
+    // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔐 Auth state changed:', event);
       
-      // Only process SIGNED_IN and SIGNED_OUT events, ignore TOKEN_REFRESHED
+      // Only process SIGNED_IN and SIGNED_OUT events
       if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         return;
       }
       
-      if (session?.user) {
-        setUser({
-            name: session.user.user_metadata.name || session.user.email?.split('@')[0] || 'User',
-            email: session.user.email || '',
-            role: session.user.user_metadata.role || "patient"
-        });
-        
-        // Only check profile on SIGNED_IN event
-        if (event === 'SIGNED_IN' && !hasCheckedProfile) {
-          hasCheckedProfile = true;
+      if (session?.user && event === 'SIGNED_IN') {
+        // Fetch complete user profile with role
+        const currentUser = await authService.getCurrentUser();
+        if (currentUser) {
+          setUser({
+            name: currentUser.name,
+            email: currentUser.email,
+            role: currentUser.role
+          });
           
-          // Check profile in background without blocking
-          setTimeout(async () => {
-            try {
-              const hasCompletedProfile = await userProfileService.hasCompletedProfile();
-              
-              if (!hasCompletedProfile) {
-                console.log('🚨 Profile not completed');
-                setShowProfileSetup(true);
-                setShowOnboarding(false);
-              } else {
-                console.log('✅ Profile completed');
-                setShowProfileSetup(false);
+          // Check profile completion
+          if (!hasCheckedProfile) {
+            hasCheckedProfile = true;
+            
+            setTimeout(async () => {
+              try {
+                const hasCompletedProfile = await userProfileService.hasCompletedProfile();
                 
-                const hasSeenOnboarding = localStorage.getItem("dietec-onboarding-completed");
-                if (!hasSeenOnboarding) {
-                  setTimeout(() => setShowOnboarding(true), 1000);
+                if (!hasCompletedProfile) {
+                  console.log('🚨 Profile not completed');
+                  setShowProfileSetup(true);
+                  setShowOnboarding(false);
+                } else {
+                  console.log('✅ Profile completed');
+                  setShowProfileSetup(false);
+                  
+                  const hasSeenOnboarding = localStorage.getItem("dietec-onboarding-completed");
+                  if (!hasSeenOnboarding) {
+                    setTimeout(() => setShowOnboarding(true), 1000);
+                  }
                 }
+              } catch (error) {
+                console.error('❌ Error checking profile:', error);
               }
-            } catch (error) {
-              console.error('❌ Error checking profile:', error);
-            }
-          }, 100);
+            }, 100);
         }
       } else {
         setUser(null);
